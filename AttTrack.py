@@ -542,7 +542,7 @@ optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.
 
 
 
-NUM_EPOCHS = 60000
+NUM_EPOCHS = 6
 
 loss_over_time=[]
 test_error=[]
