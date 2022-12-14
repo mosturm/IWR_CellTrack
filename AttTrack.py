@@ -353,21 +353,28 @@ def train_epoch(model, optimizer,loss_fn):
     src1= src1.to(DEVICE)
     src2= src2.to(DEVICE)
     
-    
     src_padding_mask1=create_mask(src1,-100)
     src_padding_mask2=create_mask(src2,-100)
-    
-    Ad = model(src1,src2,src_padding_mask1,src_padding_mask2)
+    try:
+        Ad,out1,out2,out_dec1,src1_t1,src2_t2 = model(src1,src2,src_padding_mask1,src_padding_mask2)
+    except:    
+        Ad = model(src1,src2,src_padding_mask1,src_padding_mask2)
 
     optimizer.zero_grad()
 
    
     loss = loss_fn.loss(Ad,y)
+    
+    #print(Ad[0],y[0])
     #print('l',loss)
+    #print('l',loss.item() / len(src1))
+    
     loss.backward()
 
     optimizer.step()
     losses += loss.item()
+    
+    
 
     return losses / len(src1)
 
@@ -404,13 +411,14 @@ def evaluate(model,loss_fn):
         
     src1= src1.to(DEVICE)
     src2= src2.to(DEVICE)
-
-
     
     src_padding_mask1=create_mask(src1,-100)
     src_padding_mask2=create_mask(src2,-100)
     
-    Ad = model(src1,src2,src_padding_mask1,src_padding_mask2)
+    try:
+        Ad,out1,out2,out_dec1,src1_t1,src2_t2 = model(src1,src2,src_padding_mask1,src_padding_mask2)
+    except:    
+        Ad = model(src1,src2,src_padding_mask1,src_padding_mask2)
 
     
    
@@ -512,6 +520,86 @@ class AdjacencyTransformer(nn.Module):
     
   
     
+class AdjacencyTransformer_2(nn.Module):
+    def __init__(self,
+                 num_encoder_layers: int,
+                 emb_size: int,
+                 nhead: int,
+                 out = True, 
+                 dim_feedforward: int = 512,
+                 dropout: float = 0.05):
+        super(AdjacencyTransformer_2, self).__init__()
+        
+        
+        
+        encoder_layer = nn.TransformerEncoderLayer(d_model=emb_size, nhead=nhead,dim_feedforward=dim_feedforward)
+        decoder_layer = nn.TransformerDecoderLayer(d_model=emb_size, nhead=nhead,dim_feedforward=dim_feedforward)
+        
+        
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_encoder_layers)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+        
+        #self.positional_encoding = PositionalEncoding(emb_size, dropout=dropout)
+        
+        self.sig = torch.nn.Sigmoid()
+        self.Ad = makeAdja()
+        
+        #self.lin = nn.Sequential(
+        #    nn.Linear(input_dim, emb_size),
+        #    nn.LeakyReLU())
+        
+        self.lin = nn.Sequential(
+            nn.Linear(emb_size, emb_size),
+            nn.LeakyReLU())
+        
+        self.out=out 
+
+    def forward(self,
+                src_t1: Tensor,
+                src_t2: Tensor,
+                src_padding_mask1: Tensor,
+                src_padding_mask2: Tensor):
+        
+        #print('trans_src_before_pos',src_t1,src_t1.size())
+        #print('trans_src_toke',self.src_tok_emb(src),self.src_tok_emb(src).size())
+        #src_t1 = self.lin(src_t1)
+        #src_t2 = self.lin(src_t2)
+        
+        #src_t1 = self.lin2(src_t1)
+        #src_t2 = self.lin2(src_t2)
+        
+        #src1_emb = self.positional_encoding(src_t1)
+        #src2_emb = self.positional_encoding(src_t2)
+        #print('trans_src',src1_emb,src1_emb.size())
+        #print('trans_src_padd',src_padding_mask1,src_padding_mask1.size())
+        out1 = self.encoder(src_t1,src_key_padding_mask=src_padding_mask1)
+        out2 = self.encoder(src_t2,src_key_padding_mask=src_padding_mask2)
+        
+        out_dec1=self.decoder(out2, out1,tgt_key_padding_mask=src_padding_mask2,memory_key_padding_mask=src_padding_mask1)
+        
+        #out_dec2=self.decoder(out1, out2,tgt_key_padding_mask=src_padding_mask1,memory_key_padding_mask=src_padding_mask2)
+        out_dec2=out1
+        #out1=torch.transpose(out1,0,1)
+        #out2=torch.transpose(out2,0,1)
+        #out2=torch.transpose(out2,1,2)
+        
+        #z=self.sig(torch.bmm(out1,out2))
+        
+        out_dec1 = self.lin(out_dec1)
+        
+        out_dec2=torch.transpose(out_dec2,0,1)
+        out_dec1=torch.transpose(out_dec1,0,1)
+        out_dec1=torch.transpose(out_dec1,1,2)
+        
+        z=self.sig(torch.bmm(out_dec2,out_dec1))
+        
+        
+        Ad=self.Ad.forward(z,src_padding_mask1,src_padding_mask2)
+        
+        if self.out:
+            return Ad,out1,out2,out_dec1,src_t1,src_t2
+        else:
+            return Ad
     
     
     
@@ -526,7 +614,8 @@ nhead= 6
 num_encoder_layers = 3
 
 
-transformer = AdjacencyTransformer(num_encoder_layers, emb_size, nhead)
+transformer = AdjacencyTransformer_2(num_encoder_layers, emb_size, nhead)
+#transformer = AdjacencyTransformer(num_encoder_layers, emb_size, nhead)
 
 for p in transformer.parameters():
     if p.dim() > 1:
@@ -555,12 +644,12 @@ for epoch in range(1, NUM_EPOCHS+1):
     
     
     loss_over_time.append(train_loss)
-    np.savetxt('./'+'train_loss_AttTrack24.txt', np.c_[loss_over_time],delimiter='\t',header='trainloss')
+    np.savetxt('./'+'train_loss_AttTrack_2.txt', np.c_[loss_over_time],delimiter='\t',header='trainloss')
     
     test_error.append(val_loss)
                 
-    np.savetxt('./'+'test_loss_AttTrack24.txt', np.c_[test_error],delimiter='\t',header='testloss')
+    np.savetxt('./'+'test_loss_AttTrack_2.txt', np.c_[test_error],delimiter='\t',header='testloss')
     
     print((f"Epoch: {epoch}, Train loss: {train_loss:.3f}, Val loss: {val_loss:.3f}, "f"Epoch time = {(end_time - start_time):.3f}s"))
 
-torch.save(transformer.state_dict(), 'AttTrack24.pt')
+torch.save(transformer.state_dict(), 'AttTrack_2.pt')
